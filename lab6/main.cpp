@@ -1,5 +1,7 @@
-#include "buddy.hh"
 #include <iostream>
+
+#include "buddy.hh"
+#include "process.hh"
 
 int main()
 {
