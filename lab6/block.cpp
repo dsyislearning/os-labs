@@ -94,5 +94,5 @@ int Block::is_buddy(Block &block)
 
 std::string Block::str()
 {
-    return "Block[" + std::to_string(this->num_pages) + "pages:" + std::to_string(this->start) + "-" + std::to_string(this->end) + ", " + std::to_string(this->owner) + "]";
+    return "Block{" + std::to_string(this->num_pages) + "[" + std::to_string(this->start) + "-" + std::to_string(this->end) + "]," + std::to_string(this->owner) + "}";
 }

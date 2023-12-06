@@ -2,6 +2,7 @@
 #define BLOCK_HH
 
 #include <iostream>
+#include <atomic>
 
 #define LEFT_BUDDY 0
 #define RIGHT_BUDDY 1
@@ -9,6 +10,11 @@
 class Block
 {
 private:
+    // std::atomic<int> order;
+    // std::atomic<int> start;
+    // std::atomic<int> end;
+    // std::atomic<int> num_pages;
+    // std::atomic<int> owner;
     int order;
     int start;
     int end;

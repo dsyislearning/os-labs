@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <thread>
 
 #include "buddy.hh"
@@ -9,18 +10,26 @@
 
 int main()
 {
-    Zone zone{10, 2};
-    std::mutex zone_mutex;
+    Log("伙伴系统模拟开始... 请勿对输出文件进行操作");
+    std::ofstream file("output.txt");
+    std::streambuf *coutbuf = std::cout.rdbuf();
+    std::cout.rdbuf(file.rdbuf());
 
-    Process *processes[PROCESS_NUM];
-    for (int i = 0; i < PROCESS_NUM; i++)
     {
-        processes[i] = new Process(i, zone, zone_mutex);
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        Zone zone{10, 1};
+
+        Process small{0, zone, 1, 4};
+        Process middle{1, zone, 32, 8};
+        Process large(2, zone, 64, 16);
+
+        small.join();
+        middle.join();
+        large.join();
     }
 
-    for (int i = 0; i < PROCESS_NUM; i++)
-        processes[i]->join();
+    file.close();
+    std::cout.rdbuf(coutbuf);
+    Log("伙伴系统模拟结束... 请在 output.txt 中查看输出结果");
 
     return 0;
 }

@@ -10,10 +10,21 @@
 // 构造函数
 
 Zone::Zone(int order, int lazy)
-    : max_order(order), lazy(lazy), hot_pages_deamon_running(true)
+    : max_order(order),
+      total_requests(0),
+      success(0),
+      shortage_fail(0),
+      fragment_fail(0),
+      other_fail(0),
+      full_pages(0),
+      empty_pages(0),
+      lazy(lazy),
+      hot_pages_deamon_running(true)
 {
     this->free_list = std::vector<std::deque<Block>>(order + 1, std::deque<Block>(0));
-    this->free_list[order].push_back(Block(order, 0, (1 << order) - 1, 1 << order, -1));
+    int pages = 1 << order;
+    this->free_list[order].push_back(Block(order, 0, pages - 1, pages, -1));
+    this->empty_pages = pages;
 
     this->hot_pages_queue = std::queue<Block>();
     this->hot_pages_deamon_thread = std::thread(&Zone::hot_pages_deamon, this);
@@ -27,9 +38,56 @@ Zone::~Zone()
 
     if (this->hot_pages_deamon_thread.joinable())
         this->hot_pages_deamon_thread.join();
+
+    this->audit();
 }
 
-Block *Zone::get_block(int order)
+void Zone::print_free_list()
+{
+    // 使用 RAII 机制加锁
+    std::lock_guard<std::recursive_mutex> lock(this->free_list_mutex);
+
+    std::cout << "free_list:" << std::endl;
+    for (int i = 0; i <= this->max_order; i++)
+    {
+        std::cout << "free_list[" << i << "]: ";
+        for (auto it = this->free_list[i].begin(); it != this->free_list[i].end(); it++)
+            std::cout << it->str() << " ";
+        std::cout << std::endl;
+    }
+}
+
+void Zone::print_hot_pages_queue()
+{
+    // 使用 RAII 机制加锁
+    std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
+
+    std::cout << "hot_pages_queue: ";
+    std::queue<Block> temp = this->hot_pages_queue;
+    while (temp.size() > 0)
+    {
+        std::cout << temp.front().str() << " ";
+        temp.pop();
+    }
+    std::cout << std::endl;
+}
+
+void Zone::audit()
+{
+    std::cout << "total_requests: " << this->total_requests << std::endl;
+    std::cout << "success: " << this->success << std::endl;
+    std::cout << "shortage_fail: " << this->shortage_fail << std::endl;
+    std::cout << "fragment_fail: " << this->fragment_fail << std::endl;
+    std::cout << "other_fail: " << this->other_fail << std::endl;
+    std::cout << "full_pages: " << this->full_pages << std::endl;
+    std::cout << "empty_pages: " << this->empty_pages << std::endl;
+
+    std::cout << "size of hot_pages_queue: " << this->hot_pages_queue.size() << std::endl;
+
+    this->print_free_list();
+}
+
+Block *Zone::get_block(int order, int owner)
 {
     // 使用 RAII 机制加锁
     std::lock_guard<std::recursive_mutex> lock(this->free_list_mutex);
@@ -42,7 +100,18 @@ Block *Zone::get_block(int order)
     // 如果遍历整个空闲页面链表都没有找到空闲页面，则无法分配
     if (i > max_order)
     {
-        Log("#空闲链表# 没有足够的空闲页面");
+        if (this->because_of_shortage(1 << order))
+        {
+            Log("#空闲链表# 由于实际空间不足无法分配 2^", order, " 个 Block 给进程 ", owner);
+            this->shortage_fail += 1;
+        }
+        else
+        {
+            Log("#空闲链表# 由于内存碎片无法分配 2^", order, " 个 Block 给进程 ", owner);
+            this->fragment_fail += 1;
+        }
+        this->print_hot_pages_queue();
+        this->print_free_list();
         return nullptr;
     }
 
@@ -74,6 +143,7 @@ Block *Zone::get_block(int order)
 
     // 从空闲页面链表表头取出一个空闲页面
     this->free_list[order].pop_front();
+    block->set_owner(owner);
 
     Log("#空闲链表# ", block->str(), " 被取出");
 
@@ -93,6 +163,7 @@ void Zone::insert_block(Block &block)
     // 如果空闲页面链表为空，则直接将该空闲页面加入到空闲页面链表中
     if (this->free_list[order].size() == 0)
     {
+        block.set_owner(-1);
         this->free_list[order].push_back(block);
 
         Log("#空闲链表# free_list[", order, "] 为空，直接插入 ", block.str());
@@ -118,9 +189,10 @@ void Zone::insert_block(Block &block)
     // 没有伙伴，则直接将该空闲页面加入到空闲页面链表中
     if (is_buddy == -1)
     {
+        block.set_owner(-1);
         this->free_list[order].push_back(block);
 
-        Log("#空闲链表# 没有伙伴或合并完成 ", block.str(), " 插入 ", "free_list[", order, "]");
+        Log("#空闲链表# ", block.str(), " 插入 ", "free_list[", order, "]");
     }
     else
     {
@@ -152,9 +224,13 @@ void Zone::insert_block(Block &block)
 
 Block *Zone::alloc(int size, int owner)
 {
+    this->total_requests += 1;
+
+    // 请求页面数小于等于 0，则无法分配
     if (size <= 0)
     {
         Log("#页面分配# ", "请求页面数 ", size, " 小于等于 0");
+        this->other_fail += 1;
         return nullptr;
     }
 
@@ -168,12 +244,13 @@ Block *Zone::alloc(int size, int owner)
     {
         int max_order = this->max_order;
         Log("#页面分配# ", "请求 2^", order, " 个 Block ，超过该伙伴系统区域的最大页面数 ", max_order);
+        this->shortage_fail += 1;
         return nullptr;
     }
 
     // 首先从热页面队列中查找是否有空闲页面
     this->hot_pages_mutex.lock();
-    if (this->hot_pages_queue.size() > 0)
+    while (this->hot_pages_queue.size() > 0)
     {
         Block *block = &this->hot_pages_queue.front();
 
@@ -188,33 +265,54 @@ Block *Zone::alloc(int size, int owner)
 
             Log("#页面分配# ", block->str(), " 从热页队列中分配给进程 ", owner);
 
+            this->success += 1;
+            this->full_pages += block->get_num_pages();
+            this->empty_pages -= block->get_num_pages();
+
             // 释放互斥锁
             this->hot_pages_mutex.unlock();
 
             return block;
         }
+        else // 没有找到就把当前的 block 插入回空闲页面链表中
+        {
+            this->hot_pages_queue.pop();
+
+            Log("#热页队列# ", block->str(), " 从热页队列中取出");
+
+            this->insert_block(*block);
+        }
     }
     this->hot_pages_mutex.unlock();
 
     // 如果热页面队列中没有空闲页面，则从空闲页面链表中查找是否有空闲页面
-    Block *block = this->get_block(order);
-    block->set_owner(owner);
+    Block *block = this->get_block(order, owner);
 
-    Log("#页面分配# ", block->str(), " 从空闲页面链表中分配给进程 ", owner);
+    if (block != nullptr)
+    {
+        this->success += 1;
+        this->full_pages += block->get_num_pages();
+        this->empty_pages -= block->get_num_pages();
+        Log("#页面分配# ", block->str(), " 从空闲页面链表中分配给进程 ", owner);
+    }
 
     return block;
 }
 
 void Zone::free(Block &block)
 {
-    // 加锁
+    // // 使用 RAII 机制加锁
+    // std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
     this->hot_pages_mutex.lock();
 
+    block.set_owner(-1);
     this->hot_pages_queue.push(block);
+
+    this->full_pages -= block.get_num_pages();
+    this->empty_pages += block.get_num_pages();
 
     Log("#页面释放# ", block.str(), " 加入热页队列");
 
-    // 解锁
     this->hot_pages_mutex.unlock();
 }
 
@@ -256,12 +354,7 @@ void Zone::hot_pages_deamon()
     this->hot_pages_mutex.unlock();
 }
 
-void Zone::test()
+bool Zone::because_of_shortage(int request)
 {
-    std::queue<Block *> blocks;
-
-    blocks.push(this->get_block(3));
-    this->insert_block(*(blocks.front()));
-
-    blocks.pop();
+    return this->empty_pages < request;
 }
