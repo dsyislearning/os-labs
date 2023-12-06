@@ -1,4 +1,5 @@
 #include "block.hh"
+#include <string>
 
 // 构造函数
 
@@ -75,16 +76,23 @@ void Block::set_num_pages(int num_pages)
 }
 
 // 判断某个Block是否是this的伙伴
-int Block::is_buddy(Block *block)
+int Block::is_buddy(Block &block)
 {
-    if (this->order != block->get_order())
+    if (this->order != block.get_order())
         return -1;
 
-    if (this->start == block->get_end() + 1)
+    if (this->start == block.get_end() + 1)
         return LEFT_BUDDY;
 
-    if (this->end == block->get_start() - 1)
+    if (this->end == block.get_start() - 1)
         return RIGHT_BUDDY;
 
     return -1;
+}
+
+// 重载输出运算符
+
+std::string Block::str()
+{
+    return "Block[" + std::to_string(this->num_pages) + "pages:" + std::to_string(this->start) + "-" + std::to_string(this->end) + ", " + std::to_string(this->owner) + "]";
 }

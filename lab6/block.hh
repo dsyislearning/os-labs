@@ -1,6 +1,8 @@
 #ifndef BLOCK_HH
 #define BLOCK_HH
 
+#include <iostream>
+
 #define LEFT_BUDDY 0
 #define RIGHT_BUDDY 1
 
@@ -26,7 +28,9 @@ public:
     void set_end(int end);
     void set_num_pages(int num_pages);
     void set_owner(int owner);
-    int is_buddy(Block *block);
+    int is_buddy(Block &block);
+
+    std::string str();
 };
 
 #endif // BLOCK_HH

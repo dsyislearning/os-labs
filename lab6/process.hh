@@ -11,14 +11,18 @@ class Process
 {
 private:
     int id;
-    Zone *zone;
+    
+    Zone &zone;
+    std::mutex &zone_mutex;
+
     std::thread entity;
-    std::deque<Block *> blocks;
+    
+    std::deque<Block> blocks;
 
     void run();
 
 public:
-    Process(int id, Zone *zone);
+    Process(int id, Zone &zone, std::mutex &zone_mutex);
     void join();
 };
 
