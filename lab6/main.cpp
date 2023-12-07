@@ -17,10 +17,11 @@ int main()
 
     {
         Zone zone{10, 1};
+        std::mutex zone_mutex;
 
         Process small{0, zone, 1, 4};
         Process middle{1, zone, 32, 8};
-        Process large(2, zone, 64, 16);
+        Process large{2, zone, 64, 16};
 
         small.join();
         middle.join();

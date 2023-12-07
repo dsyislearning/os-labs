@@ -36,7 +36,7 @@ void Process::run()
 
                 Log("#用户进程# ", this->id, " 得到 ", block->str());
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
             else
             {
@@ -49,7 +49,10 @@ void Process::run()
             {
                 // 以较为随机的次序进行释放
                 std::uniform_int_distribution<> dis(0, this->blocks.size() - 1);
-                Block block_to_free = this->blocks[dis(gen)];
+                int index = dis(gen);
+                Block block_to_free = this->blocks[index];
+                this->blocks.erase(this->blocks.begin() + index);
+
                 this->zone.free(block_to_free);
 
                 Log("#用户进程# ", this->id, " 释放 ", block_to_free.str());
@@ -59,10 +62,12 @@ void Process::run()
         times++;
     }
 
+    // 释放所有页面
     while (this->blocks.size() > 0)
     {
-        Block block{this->blocks.front()};
-        this->blocks.pop_front();
+        Block block = *(this->blocks.end() - 1);
+        this->blocks.pop_back();
+
         this->zone.free(block);
 
         Log("#用户进程# ", this->id, " 释放 ", block.str());

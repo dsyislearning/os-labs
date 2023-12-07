@@ -18,7 +18,7 @@ private:
 
     std::thread entity;
 
-    std::deque<Block> blocks;
+    std::vector<Block> blocks;
 
     void run();
 
