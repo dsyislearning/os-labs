@@ -26,21 +26,23 @@ void Process::run()
         {
             // 按正态分布随机生成一个请求序列
             int num_pages = std::abs(ndis(gen));
+            if (num_pages == 0)
+                num_pages = 1;
 
-            Log("#用户进程# ", this->id, " 请求 ", num_pages, " 个页面");
+            // Log("#用户进程# ", this->id, " 请求 ", num_pages, " 个页面");
 
             Block *block = this->zone.alloc(num_pages, this->id);
             if (block != nullptr)
             {
                 this->blocks.push_back(*block);
 
-                Log("#用户进程# ", this->id, " 得到 ", block->str());
+                // Log("#用户进程# ", this->id, " 得到 ", block->str());
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
             else
             {
-                Log("#用户进程# ", this->id, " 请求 ", num_pages, " 个页面失败");
+                // Log("#用户进程# ", this->id, " 请求 ", num_pages, " 个页面失败");
             }
         }
         else
@@ -55,7 +57,7 @@ void Process::run()
 
                 this->zone.free(block_to_free);
 
-                Log("#用户进程# ", this->id, " 释放 ", block_to_free.str());
+                // Log("#用户进程# ", this->id, " 释放 ", block_to_free.str());
             }
         }
 
@@ -70,7 +72,7 @@ void Process::run()
 
         this->zone.free(block);
 
-        Log("#用户进程# ", this->id, " 释放 ", block.str());
+        // Log("#用户进程# ", this->id, " 释放 ", block.str());
     }
 }
 

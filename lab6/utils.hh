@@ -6,10 +6,16 @@
 #include <string>
 #include <chrono>
 #include <iomanip>
+#include <mutex>
+
+extern std::mutex log_mutex;
 
 template <typename... Args>
 void Log(Args... args)
 {
+    // 使用 RAII 机制加锁
+    std::lock_guard<std::mutex> lock(log_mutex);
+
     std::ostringstream oss;
     ((oss << args), ...);
     std::string message = oss.str();

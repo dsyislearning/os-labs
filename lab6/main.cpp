@@ -8,6 +8,8 @@
 
 #define PROCESS_NUM 5
 
+std::mutex log_mutex;
+
 int main()
 {
     Log("伙伴系统模拟开始... 请勿对输出文件进行操作");
@@ -19,9 +21,9 @@ int main()
         Zone zone{10, 1};
         std::mutex zone_mutex;
 
-        Process small{0, zone, 1, 4};
-        Process middle{1, zone, 32, 8};
-        Process large{2, zone, 64, 16};
+        Process small{0, zone, 1, 2};
+        Process middle{1, zone, 32, 4};
+        Process large{2, zone, 64, 8};
 
         small.join();
         middle.join();

@@ -4,6 +4,7 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <sstream>
 
 #include "utils.hh"
 
@@ -47,29 +48,44 @@ void Zone::print_free_list()
     // 使用 RAII 机制加锁
     std::lock_guard<std::recursive_mutex> lock(this->free_list_mutex);
 
-    std::cout << "free_list:" << std::endl;
+    std::ostringstream oss;
+    oss << "free_list:" << std::endl;
     for (int i = 0; i <= this->max_order; i++)
     {
-        std::cout << "free_list[" << i << "]: ";
+        oss << "free_list[" << i << "]: ";
         for (auto it = this->free_list[i].begin(); it != this->free_list[i].end(); it++)
-            std::cout << it->str() << " ";
-        std::cout << std::endl;
+            oss << it->str() << " ";
+        oss << std::endl;
     }
+
+    Log(oss.str());
 }
 
 void Zone::print_hot_pages_queue()
 {
     // 使用 RAII 机制加锁
+
     std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
 
-    std::cout << "hot_pages_queue: ";
+    std::ostringstream oss;
+    oss << "hot_pages_queue: " << std::endl;
     std::queue<Block> temp = this->hot_pages_queue;
-    while (temp.size() > 0)
+    if (temp.size() == 0)
     {
-        std::cout << temp.front().str() << " ";
-        temp.pop();
+        oss << "empty";
     }
-    std::cout << std::endl;
+    else
+    {
+
+        while (temp.size() > 0)
+        {
+            oss << temp.front().str() << " ";
+            temp.pop();
+        }
+    }
+    oss << std::endl;
+
+    Log(oss.str());
 }
 
 void Zone::audit()
@@ -100,14 +116,15 @@ Block *Zone::get_block(int order, int owner)
     // 如果遍历整个空闲页面链表都没有找到空闲页面，则无法分配
     if (i > max_order)
     {
-        if (this->because_of_shortage(1 << order))
+        int pages = 1 << order;
+        if (this->because_of_shortage(pages))
         {
-            Log("#空闲链表# 由于实际空间不足无法分配 2^", order, " 个 Block 给进程 ", owner);
+            Log("#空闲链表# 由于实际空间不足无法分配 2^", order, "=", pages, " 个 Block 给进程 ", owner);
             this->shortage_fail += 1;
         }
         else
         {
-            Log("#空闲链表# 由于内存碎片无法分配 2^", order, " 个 Block 给进程 ", owner);
+            Log("#空闲链表# 由于内存碎片无法分配 2^", order, "=", pages, " 个 Block 给进程 ", owner);
             this->fragment_fail += 1;
         }
         this->print_hot_pages_queue();
@@ -123,7 +140,7 @@ Block *Zone::get_block(int order, int owner)
     {
         this->free_list[i].pop_front();
 
-        Log("#空闲链表# 分裂 ", block->str());
+        // Log("#空闲链表# 分裂 ", block->str());
 
         i--;
         int start = block->get_start();
@@ -136,7 +153,7 @@ Block *Zone::get_block(int order, int owner)
         this->free_list[i].push_back(*left);
         this->free_list[i].push_back(*right);
 
-        Log("#空闲链表# ", left->str(), " ", right->str(), " 加入到 free_list[", i, "]");
+        // Log("#空闲链表# ", left->str(), " ", right->str(), " 加入到 free_list[", i, "]");
 
         block = &this->free_list[i].front();
     }
@@ -145,7 +162,7 @@ Block *Zone::get_block(int order, int owner)
     this->free_list[order].pop_front();
     block->set_owner(owner);
 
-    Log("#空闲链表# ", block->str(), " 被取出");
+    // Log("#空闲链表# ", block->str(), " 被取出");
 
     return block;
 }
@@ -166,7 +183,7 @@ void Zone::insert_block(Block &block)
         block.set_owner(-1);
         this->free_list[order].push_back(block);
 
-        Log("#空闲链表# free_list[", order, "] 为空，直接插入 ", block.str());
+        // Log("#空闲链表# free_list[", order, "] 为空，直接插入 ", block.str());
 
         return;
     }
@@ -192,7 +209,7 @@ void Zone::insert_block(Block &block)
         block.set_owner(-1);
         this->free_list[order].push_back(block);
 
-        Log("#空闲链表# ", block.str(), " 插入 ", "free_list[", order, "]");
+        // Log("#空闲链表# ", block.str(), " 插入 ", "free_list[", order, "]");
     }
     else
     {
@@ -204,7 +221,7 @@ void Zone::insert_block(Block &block)
             end = block.get_end();
             Block new_block{order, start, end, num_pages, -1};
 
-            Log("#空闲链表# ", buddy->str(), " ", block.str(), " 被合并成 ", new_block.str());
+            // Log("#空闲链表# ", buddy->str(), " ", block.str(), " 被合并成 ", new_block.str());
 
             this->insert_block(new_block); // 插入合并后的 block
         }
@@ -214,7 +231,7 @@ void Zone::insert_block(Block &block)
             end = buddy->get_end();
             Block new_block{order, start, end, num_pages, -1};
 
-            Log("#空闲链表# ", block.str(), " ", buddy->str(), " 被合并成 ", new_block.str());
+            // Log("#空闲链表# ", block.str(), " ", buddy->str(), " 被合并成 ", new_block.str());
 
             this->insert_block(new_block); // 插入合并后的 block
         }
@@ -311,14 +328,14 @@ void Zone::free(Block &block)
     this->full_pages -= block.get_num_pages();
     this->empty_pages += block.get_num_pages();
 
-    Log("#页面释放# ", block.str(), " 加入热页队列");
+    Log("#热页队列# ", block.str(), " 加入热页队列");
 
     this->hot_pages_mutex.unlock();
 }
 
 void Zone::hot_pages_deamon()
 {
-    Log("#热页队列# 守护线程启动");
+    // Log("#热页队列# 守护线程启动");
     while (this->hot_pages_deamon_running)
     {
         // 加锁
@@ -330,7 +347,7 @@ void Zone::hot_pages_deamon()
             Block block = this->hot_pages_queue.front();
             this->hot_pages_queue.pop();
 
-            Log("#热页队列# ", block.str(), " 加入到空闲页面链表中");
+            // Log("#热页队列# ", block.str(), " 加入到空闲页面链表中");
 
             this->insert_block(block);
         }
@@ -347,7 +364,7 @@ void Zone::hot_pages_deamon()
         Block block = this->hot_pages_queue.front();
         this->hot_pages_queue.pop();
 
-        Log("#热页队列# ", block.str(), " 加入到空闲页面链表中");
+        // Log("#热页队列# ", block.str(), " 加入到空闲页面链表中");
 
         this->insert_block(block);
     }
