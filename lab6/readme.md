@@ -39,6 +39,60 @@
 - 处理器：8 × 11th Gen Intel® Core™ i5-11300H @ 3.10GHz
 - 内存：15.4 GiB of RAM
 
+### 运行方法
+
+确保在当前工作目录下有以下文件：
+
+```
+.
+├── block.cpp
+├── block.hh
+├── buddy.cpp
+├── buddy.hh
+├── main.cpp
+├── main_slab.cpp
+├── makefile
+├── process.cpp
+├── process.hh
+├── slabcache.cpp
+├── slabcache.hh
+├── slab.cpp
+├── slab.hh
+├── slabobject.cpp
+├── slabobject.hh
+├── slabpage.cpp
+├── slabpage.hh
+└── utils.hh
+```
+
+#### 伙伴系统模拟程序
+
+构建伙伴系统模拟程序
+
+```zsh
+make buddy
+```
+
+运行伙伴系统模拟程序
+
+```zsh
+./buddy
+```
+
+#### Slab 模拟程序
+
+构建 Slab 模拟程序
+
+```zsh
+make slab
+```
+
+运行 Slab 模拟程序
+
+```zsh
+./slab
+```
+
 ## 实验步骤
 
 ### 6-1 伙伴系统实现
@@ -690,11 +744,282 @@ free_list[10]:
 
 ### 6-2 Slab 实现
 
+在Linux中，伙伴算法是以页为单位管理和分配内存。但是现实的需求却以字节为单位，假如我们需要申请20Bytes，总不能分配一页吧！那此不是严重浪费内存。那么该如何分配呢？slab分配器就应运而生了，专为小内存分配而生。slab分配器分配内存以字节为单位。但是slab分配器并没有脱离伙伴算法，而是基于伙伴算法分配的大内存进一步细分成小内存分配。
 
+#### 数据对象定义
+
+##### Slab 系统
+
+外部调用 Slab 的接口
+
+```cpp
+class Slab
+{
+private:
+    Zone &zone; // 调用的伙伴系统区域
+
+    std::deque<SlabCache> caches; // 缓存列表
+
+    bool cache_exists(int size);    // 判断是否存在对应对象大小的缓存
+    SlabCache *get_cache(int size); // 获取对应对象大小的缓存
+
+public:
+    Slab(Zone &zone);
+    ~Slab();
+
+    bool alloc(int object_size); // 从缓存中分配一个对象
+    bool free(int object_size);  // 释放一个对象
+
+    void print_slab(); // 打印缓存列表
+};
+```
+
+##### 缓存列表
+
+缓存以缓存对象的大小来区分，所包含的三种slab都是链表，里面有一个或多个slab，每个slab由一个或多个连续的物理页组成，在物理页上保存的才是对象。
+
+```cpp
+class SlabCache
+{
+private:
+    Zone &zone;                         // 调用的伙伴系统区域
+    int object_size;                    // 该缓存管理的对象大小
+    std::deque<SlabPage> slabs_full;    // 完全分配的 SlabPage
+    std::deque<SlabPage> slabs_partial; // 部分分配的 SlabPage
+    std::deque<SlabPage> slabs_free;    // 未分配的 SlabPage
+
+    void reap(SlabPage &slabpage); // 回收 SlabPage 给伙伴系统
+
+public:
+    SlabCache(Zone &zone, int object_size);
+    int get_object_size(); // 获取管理的对象大小
+    bool alloc();          // 从缓存中分配一个对象
+    bool free();           // 释放一个对象
+
+    std::string str();
+};
+```
+
+##### Slab
+
+slab是slab分配器的最小单位，在实现上一个slab由一个或多个连续的物理页组成（通常只有一页）。单个slab可以在slab链表之间移动，例如如果一个半满slab被分配了对象后变满了，就要从slabs_partial中被删除，同时插入到slabs_full中去。
+
+```cpp
+class SlabPage
+{
+private:
+    Zone &zone;             // 伙伴系统区域
+    Block *block_ptr;       // 伙伴系统分配的内存块指针
+    Block block;            // 伙伴系统分配的内存块
+    int slab_size;          // SlabPage 的大小，单位为字节
+    int object_size;        // 该 SlabPage 管理的对象大小，单位为字节
+    int object_num;         // 该 SlabPage 管理的对象数量
+    std::vector<bool> used; // 该 SlabPage 中对象的使用情况
+
+public:
+    SlabPage(Zone &zone, int object_size);
+    Block get_block();
+
+    bool failed();     // 判断是否从伙伴系统分配内存失败
+    int alloc();       // 从 SlabPage 中分配一个对象，返回对象的下标
+    bool free();       // 释放一个对象
+    bool is_full();    // 判断 SlabPage 是否完全分配
+    bool is_free();    //  判断 SlabPage 是否完全未分配
+    bool is_partial(); // 判断 SlabPage 是否部分分配
+
+    std::string str();
+};
+```
+
+#### 分配
+
+首先判断是否有管理某种对象大小的缓存，如果没有就创建，向伙伴系统申请内存，实现动态分配 Cache 的功能。
+
+```cpp
+bool Slab::alloc(int object_size)
+{
+    if (!cache_exists(object_size)) // 如果没有对应对象大小的缓存，就创建一个
+    {
+        caches.push_back(SlabCache(zone, object_size));
+        // Log("创建 ", object_size, "B 对象的缓存");
+    }
+
+    SlabCache *cache = get_cache(object_size); // 获取对应对象大小的缓存
+    // Log("获取 ", object_size, "B 对象的缓存");
+
+    return cache->alloc(); // 从缓存中分配一个对象
+}
+```
+
+#### 释放
+
+首先根据释放对象大小找到管理该类对象的缓存，然后调用缓存的方法来释放对象
+
+```cpp
+bool Slab::free(int object_size)
+{
+    SlabCache *cache = get_cache(object_size); // 获取对应对象大小的缓存
+    // Log("获取 ", object_size, "B 对象的缓存");
+
+    if (cache != nullptr)
+    {
+        return cache->free(); // 释放对象
+    }
+    else
+    {
+        return false;
+    }
+}
+```
+
+缓存首先从 `slabs_full` 中释放对象，如果没有完全分配的 slab 就从 `slabs_partial` 中释放，如果部分分配的 slab 也没有，就说明释放失败
+
+最后检查一下有没有完全未分配的 slab 在 `slabs_free` 中，如果有就将其回收给伙伴系统。
+
+```cpp
+bool SlabCache::free()
+{
+    bool success = false;
+
+    if (!slabs_full.empty())
+    {
+        SlabPage slabpage = slabs_full.front();
+
+        success = slabpage.free();
+
+        // Log("从 slabs_full 中释放一个对象");
+
+        if (slabpage.is_partial())
+        {
+            slabs_full.pop_front();
+            slabs_partial.push_back(slabpage);
+        }
+        else if (slabpage.is_free())
+        {
+            slabs_full.pop_front();
+            slabs_free.push_back(slabpage);
+        }
+    }
+    else if (!slabs_partial.empty())
+    {
+        SlabPage &slabpage = slabs_partial.front();
+
+        success = slabpage.free();
+
+        // Log("从 slabs_partial 中释放一个对象");
+
+        if (slabpage.is_free())
+        {
+            slabs_partial.pop_front();
+            slabs_free.push_back(slabpage);
+        }
+    }
+
+    if (!slabs_free.empty())
+    {
+        SlabPage &slabpage = slabs_free.front();
+        slabs_free.pop_front();
+
+        // Log("从 slabs_free 中回收 slabpage");
+
+        reap(slabpage);
+    }
+
+    return success;
+}
+```
+
+#### 空闲 Slab 回收
+
+将 slab 回收给伙伴系统
+
+```cpp
+void SlabCache::reap(SlabPage &slabpage)
+{
+    Block block = slabpage.get_block();
+    zone.free(block);
+    // Log("回收页块 ", block.str());
+}
+```
+
+如下是一部分 Slab 模拟的内容，可以清楚的看到 slab 的不同状态（处在哪一个链表中），以及分配与释放和回收的过程
+
+```
+[2023-12-08 23:10:02] #页面分配# Block{4[0-3],-1} 从空闲页面链表中分配给进程 -1
+[2023-12-08 23:10:02] 分配 3072B 对象
+[2023-12-08 23:10:02] slab:
+slabcache[3072]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+[2023-12-08 23:10:02] #页面分配# Block{1[4-4],-1} 从空闲页面链表中分配给进程 -1
+[2023-12-08 23:10:02] 分配 2048B 对象
+[2023-12-08 23:10:02] slab:
+slabcache[3072]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+slabcache[2048]:
+	slabs_full: 
+	slabs_partial: slabpage{1/2}
+	slabs_free: 
+[2023-12-08 23:10:02] #页面分配# Block{1[5-5],-1} 从空闲页面链表中分配给进程 -1
+[2023-12-08 23:10:02] 分配 1024B 对象
+[2023-12-08 23:10:02] slab:
+slabcache[3072]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+slabcache[2048]:
+	slabs_full: 
+	slabs_partial: slabpage{1/2}
+	slabs_free: 
+slabcache[1024]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+[2023-12-08 23:10:02] #热页队列# Block{1[4-4],-1} 加入热页队列
+[2023-12-08 23:10:02] 释放 2048B 对象
+[2023-12-08 23:10:02] slab:
+slabcache[3072]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+slabcache[2048]:
+	slabs_full: 
+	slabs_partial: 
+	slabs_free: 
+slabcache[1024]:
+	slabs_full: 
+	slabs_partial: slabpage{1/4}
+	slabs_free: 
+[2023-12-08 23:10:02] #热页队列# Block{1[5-5],-1} 加入热页队列
+...
+...
+```
 
 ## 实验结果
 
+### 伙伴系统模拟输出
 
+在 `output.txt` 中
+
+### Slab 模拟输出
+
+在 `output_slab.txt` 中
 
 ## 实验总结
 
+此次实验最主要的两大收获是：
+
+- 理解了伙伴系统在内核分配中的作用，掌握了伙伴算法的分配与合并过程
+- 理解了 Slab 在分配小内核内存中对伙伴系统的改进，掌握了 Slab 、Cache 、伙伴系统之间的数据流动关系
+
+除了理解了两大内核分配方式的原理以外，还对我的程序设计能力以及 C++ 语言的理解有很大的提升：
+
+- 巩固了 C++ 面向对象编程的方法
+- 巩固了 C++ 多线程编程的方法，学习了 RAII 方式的加锁同步
+- 深化了对引用和指针的理解，深化了对容器与迭代器的理解
+- 巩固了程序设计规范性，如命名、方法设计、模块组织
+- 加强了排错能力，根据日志、单步调试等方式进行排错
+- 巩固了编写 makefile 构建 C++ 项目的方法
