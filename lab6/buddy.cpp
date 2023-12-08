@@ -64,7 +64,6 @@ void Zone::print_free_list()
 void Zone::print_hot_pages_queue()
 {
     // 使用 RAII 机制加锁
-
     std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
 
     std::ostringstream oss;
@@ -90,15 +89,18 @@ void Zone::print_hot_pages_queue()
 
 void Zone::audit()
 {
-    std::cout << "total_requests: " << this->total_requests << std::endl;
-    std::cout << "success: " << this->success << std::endl;
-    std::cout << "shortage_fail: " << this->shortage_fail << std::endl;
-    std::cout << "fragment_fail: " << this->fragment_fail << std::endl;
-    std::cout << "other_fail: " << this->other_fail << std::endl;
-    std::cout << "full_pages: " << this->full_pages << std::endl;
-    std::cout << "empty_pages: " << this->empty_pages << std::endl;
+    std::ostringstream oss;
+    oss << "audit:" << std::endl;
+    oss << "total_requests: " << this->total_requests << std::endl;
+    oss << "success: " << this->success << std::endl;
+    oss << "shortage_fail: " << this->shortage_fail << std::endl;
+    oss << "fragment_fail: " << this->fragment_fail << std::endl;
+    oss << "other_fail: " << this->other_fail << std::endl;
+    oss << "full_pages: " << this->full_pages << std::endl;
+    oss << "empty_pages: " << this->empty_pages << std::endl;
+    Log(oss.str());
 
-    std::cout << "size of hot_pages_queue: " << this->hot_pages_queue.size() << std::endl;
+    this->print_hot_pages_queue();
 
     this->print_free_list();
 }
@@ -318,9 +320,8 @@ Block *Zone::alloc(int size, int owner)
 
 void Zone::free(Block &block)
 {
-    // // 使用 RAII 机制加锁
-    // std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
-    this->hot_pages_mutex.lock();
+    // 使用 RAII 机制加锁
+    std::lock_guard<std::mutex> lock(this->hot_pages_mutex);
 
     block.set_owner(-1);
     this->hot_pages_queue.push(block);
@@ -330,7 +331,6 @@ void Zone::free(Block &block)
 
     Log("#热页队列# ", block.str(), " 加入热页队列");
 
-    this->hot_pages_mutex.unlock();
 }
 
 void Zone::hot_pages_deamon()
