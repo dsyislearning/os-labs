@@ -6,11 +6,17 @@
 #include <random>
 #include <chrono>
 #include <thread>
+#include <fstream>
 
 std::mutex log_mutex;
 
 int main()
 {
+    Log("Slab 模拟开始... 请勿对输出文件进行操作");
+    std::ofstream file("output_slab.txt");
+    std::streambuf *coutbuf = std::cout.rdbuf();
+    std::cout.rdbuf(file.rdbuf());
+
     Zone zone(10, 1);
     Slab slab(zone);
 
@@ -57,6 +63,10 @@ int main()
             slab.print_slab();
         }
     }
+
+    file.close();
+    std::cout.rdbuf(coutbuf);
+    Log("Slab 模拟结束... 请在 output_slab.txt 中查看输出结果");
 
     return 0;
 }

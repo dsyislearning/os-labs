@@ -282,7 +282,7 @@ Block *Zone::alloc(int size, int owner)
 
             block->set_owner(owner);
 
-            // Log("#页面分配# ", block->str(), " 从热页队列中分配给进程 ", owner);
+            Log("#页面分配# ", block->str(), " 从热页队列中分配给进程 ", owner);
 
             this->success += 1;
             this->full_pages += block->get_num_pages();
@@ -312,7 +312,7 @@ Block *Zone::alloc(int size, int owner)
         this->success += 1;
         this->full_pages += block->get_num_pages();
         this->empty_pages -= block->get_num_pages();
-        // Log("#页面分配# ", block->str(), " 从空闲页面链表中分配给进程 ", owner);
+        Log("#页面分配# ", block->str(), " 从空闲页面链表中分配给进程 ", owner);
     }
 
     return block;
@@ -329,7 +329,7 @@ void Zone::free(Block &block)
     this->full_pages -= block.get_num_pages();
     this->empty_pages += block.get_num_pages();
 
-    // Log("#热页队列# ", block.str(), " 加入热页队列");
+    Log("#热页队列# ", block.str(), " 加入热页队列");
 
 }
 
